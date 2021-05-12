@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, {useEffect, useState} from 'react';
 import './App.css';
-import { API } from 'aws-amplify';
-import { withAuthenticator, AmplifySignOut } from '@aws-amplify/ui-react';
-import { listNotes } from './graphql/queries';
-import { createNote as createNoteMutation, deleteNote as deleteNoteMutation } from './graphql/mutations';
+import {API, Storage} from 'aws-amplify';
+import {AmplifySignOut, withAuthenticator} from '@aws-amplify/ui-react';
+import {listNotes} from './graphql/queries';
+import {createNote as createNoteMutation, deleteNote as deleteNoteMutation} from './graphql/mutations';
 
 const initialFormState = {
     name: '',
@@ -19,14 +19,26 @@ function App() {
     }, []);
 
     async function fetchNotes() {
-        const apiData = await API.graphql({ query: listNotes });
+        const apiData = await API.graphql({query: listNotes});
+        const notesFromAPI = apiData.data.listNotes.items;
+        console.log('notesFromAPI', notesFromAPI);
+        await Promise.all(notesFromAPI.map(async note => {
+            if (note.image) {
+                console.log('note.image', note.image);
+                note.image = await Storage.get(note.image);
+            }
+            return note;
+        }))
         setNotes(apiData.data.listNotes.items);
     }
 
     async function createNote() {
         if (!formData.name || !formData.description) return;
-        await API.graphql({ query: createNoteMutation, variables: { input: formData } });
-        setNotes([ ...notes, formData ]);
+        await API.graphql({query: createNoteMutation, variables: {input: formData}});
+        if (formData.image) {
+            formData.image = await Storage.get(formData.image);
+        }
+        setNotes([...notes, formData]);
         setFormData(initialFormState);
     }
 
@@ -34,6 +46,14 @@ function App() {
         const newNotesArray = notes.filter(note => note.id !== id);
         setNotes(newNotesArray);
         await API.graphql({ query: deleteNoteMutation, variables: { input: { id } }});
+    }
+
+    async function onChange(e) {
+        if (!e.target.files[0]) return;
+        const file = e.target.files[0];
+        setFormData({ ...formData, image: file.name });
+        await Storage.put(file.name, file);
+        fetchNotes();
     }
 
     return (
@@ -49,6 +69,10 @@ function App() {
                 placeholder="Note description"
                 value={formData.description}
             />
+            <input
+                type="file"
+                onChange={onChange}
+            />
             <button onClick={createNote}>Create Note</button>
             <div style={{marginBottom: 30}}>
                 {
@@ -57,6 +81,9 @@ function App() {
                             <h2>{note.name}</h2>
                             <p>{note.description}</p>
                             <button onClick={() => deleteNote(note)}>Delete note</button>
+                            {
+                                note.image && <img src={note.image} style={{width: 400}}/>
+                            }
                         </div>
                     ))
                 }
